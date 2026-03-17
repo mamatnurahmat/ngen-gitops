@@ -21,6 +21,10 @@ def create_default_env():
     default_content = """# ngen-gitops Configuration
 # Uncomment and fill in the values below
 
+# GitHub Credentials (Default)
+# GITHUB_TOKEN=your-github-personal-access-token
+# GITHUB_ORG=your-github-organization
+
 # Bitbucket Credentials
 # BITBUCKET_USER=your-username
 # BITBUCKET_APP_PASSWORD=your-app-password
@@ -31,8 +35,8 @@ def create_default_env():
 # SERVER_PORT=8080
 
 # Git Settings
-# GIT_DEFAULT_REMOTE=bitbucket.org
-# GIT_DEFAULT_ORG=loyaltoid
+# GIT_DEFAULT_REMOTE=github.com
+# GIT_DEFAULT_ORG=your-github-organization
 # DEFAULT_IMAGE_REGISTRY=loyaltolpi
 
 # Notifications (Microsoft Teams)
@@ -65,6 +69,10 @@ def load_config() -> Dict[str, Any]:
     
     # Build config dictionary from environment variables
     config = {
+        "github": {
+            "token": os.getenv("GITHUB_TOKEN", ""),
+            "organization": os.getenv("GITHUB_ORG", "")
+        },
         "bitbucket": {
             "username": os.getenv("BITBUCKET_USER", ""),
             "app_password": os.getenv("BITBUCKET_APP_PASSWORD", ""),
@@ -75,8 +83,8 @@ def load_config() -> Dict[str, Any]:
             "port": int(os.getenv("SERVER_PORT", "8080"))
         },
         "git": {
-            "default_remote": os.getenv("GIT_DEFAULT_REMOTE", "bitbucket.org"),
-            "default_org": os.getenv("GIT_DEFAULT_ORG", "loyaltoid"),
+            "default_remote": os.getenv("GIT_DEFAULT_REMOTE", "github.com"),
+            "default_org": os.getenv("GIT_DEFAULT_ORG", os.getenv("GITHUB_ORG", "loyaltoid")),
             "default_image_registry": os.getenv("DEFAULT_IMAGE_REGISTRY", "loyaltolpi")
         },
         "notifications": {
@@ -178,6 +186,46 @@ def get_bitbucket_credentials() -> Dict[str, str]:
     }
 
 
+def get_github_credentials() -> Dict[str, str]:
+    """Get GitHub credentials from config.
+    
+    Priority:
+    1. Environment variables (GITHUB_TOKEN)
+    2. .env file (~/.ngen-gitops/.env)
+    3. ~/.netrc file (machine github.com)
+    
+    Returns:
+        dict: Dictionary with token and organization
+    
+    Raises:
+        ValueError: If credentials are not configured
+    """
+    config = load_config()
+    github_cfg = config.get('github', {})
+    
+    token = github_cfg.get('token', '')
+    organization = github_cfg.get('organization', '')
+    
+    # Fallback to netrc if credentials not in config
+    if not token:
+        netrc_creds = get_netrc_credentials('github.com')
+        if netrc_creds:
+            # For github, password in netrc is often used as token
+            token = token or netrc_creds['password']
+            
+    if not token:
+        raise ValueError(
+            "GitHub credentials not configured. "
+            f"Please update {ENV_FILE}, set GITHUB_TOKEN environment variable, "
+            "or configure ~/.netrc with 'machine github.com'."
+        )
+    
+    return {
+        'token': token,
+        'organization': organization
+    }
+
+
 def get_server_config() -> Dict[str, Any]:
     """Get server configuration.
     
@@ -197,8 +245,8 @@ def get_git_config() -> Dict[str, str]:
     config = load_config()
     git_config = config.get('git', {})
     return {
-        'default_remote': git_config.get('default_remote', 'bitbucket.org'),
-        'default_org': git_config.get('default_org', 'loyaltoid')
+        'default_remote': git_config.get('default_remote', 'github.com'),
+        'default_org': git_config.get('default_org', 'loyaltoid')  # Fallback
     }
 
 

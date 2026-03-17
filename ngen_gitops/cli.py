@@ -8,18 +8,28 @@ import sys
 from typing import Optional
 
 from . import __version__
-from .bitbucket import (
-    create_branch,
-    set_image_in_yaml,
-    create_pull_request,
-    merge_pull_request,
-    run_k8s_pr_workflow,
-    list_pull_requests,
-    get_pull_request_diff,
-    create_tag,
-    manage_webhook,
-    GitOpsError
-)
+from .config import get_default_remote
+
+from .bitbucket import GitOpsError as BitbucketError
+from .github import GitOpsError as GithubError
+GitOpsError = (BitbucketError, GithubError)
+
+def get_provider():
+    if 'github' in get_default_remote().lower():
+        import ngen_gitops.github as provider
+    else:
+        import ngen_gitops.bitbucket as provider
+    return provider
+
+def create_branch(*args, **kwargs): return get_provider().create_branch(*args, **kwargs)
+def set_image_in_yaml(*args, **kwargs): return get_provider().set_image_in_yaml(*args, **kwargs)
+def create_pull_request(*args, **kwargs): return get_provider().create_pull_request(*args, **kwargs)
+def merge_pull_request(*args, **kwargs): return get_provider().merge_pull_request(*args, **kwargs)
+def run_k8s_pr_workflow(*args, **kwargs): return get_provider().run_k8s_pr_workflow(*args, **kwargs)
+def list_pull_requests(*args, **kwargs): return get_provider().list_pull_requests(*args, **kwargs)
+def get_pull_request_diff(*args, **kwargs): return get_provider().get_pull_request_diff(*args, **kwargs)
+def create_tag(*args, **kwargs): return get_provider().create_tag(*args, **kwargs)
+def manage_webhook(*args, **kwargs): return get_provider().manage_webhook(*args, **kwargs)
 from .config import (
     load_config,
     get_config_file_path,
@@ -368,7 +378,7 @@ def cmd_k8s_pr(args):
                 pass
 
         if not all([cluster, namespace, deploy, image]):
-            raise GitOpsError('All arguments (cluster, namespace, deploy, image) are required for k8s-pr workflow')
+            raise get_provider().GitOpsError('All arguments (cluster, namespace, deploy, image) are required for k8s-pr workflow')
 
         result = run_k8s_pr_workflow(
             cluster=cluster,

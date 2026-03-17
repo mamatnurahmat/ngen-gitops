@@ -1,6 +1,6 @@
 # ngen-gitops
 
-GitOps CLI and web server for Bitbucket operations with general git commands supporting multi-remote workflows. Automate branch creation, YAML image updates, pull request creation, merging, and general git operations via command-line interface or REST API.
+GitOps CLI and web server for GitHub and Bitbucket operations with general git commands supporting multi-remote workflows. Automate branch creation, YAML image updates, pull request creation, merging, and general git operations via command-line interface or REST API.
 
 [![PyPI version](https://badge.fury.io/py/ngen-gitops.svg)](https://badge.fury.io/py/ngen-gitops)
 [![Python](https://img.shields.io/pypi/pyversions/ngen-gitops.svg)](https://pypi.org/project/ngen-gitops/)
@@ -8,7 +8,7 @@ GitOps CLI and web server for Bitbucket operations with general git commands sup
 
 ## Features
 
-### GitOps Operations (Bitbucket)
+### GitOps Operations (GitHub & Bitbucket)
 - 🌿 **Branch Management**: Create branches from source branches
 - 🖼️ **Image Updates**: Update container images in Kubernetes YAML files
 - 🔄 **Pull Requests**: Create, list, and merge pull requests automatically
@@ -23,7 +23,7 @@ GitOps CLI and web server for Bitbucket operations with general git commands sup
 - 📤 **Push**: Push changes to remote
 - 💾 **Commit**: Commit changes with automatic add option
 - 📊 **Status**: Check repository status
-- 🔀 **Flexible Remotes**: Default to Bitbucket, but works with GitHub and GitLab
+- 🔀 **Flexible Remotes**: Default to GitHub, but works with Bitbucket and GitLab
 
 ### General
 - 🔐 **Secure**: Uses app passwords for authentication
@@ -34,8 +34,80 @@ GitOps CLI and web server for Bitbucket operations with general git commands sup
 
 ## Installation
 
+### Using Makefile (Fastest)
+
+```bash
+# Create venv and install package
+make all
+
+# Create global symlinks (optional, requires sudo)
+make link
+
+# Release to PyPI (Bumps version, builds, and publishes)
+make release          # Auto-bump patch version (0.1.14 -> 0.1.15)
+make release 0.2.0    # Set a specific version
+```
+
+### Using Virtual Environment (Manual)
+
+To avoid conflicts with system-managed Python environments (especially on Arch Linux/CachyOS), it's recommended to install in a virtual environment:
+
+```bash
+# Create a virtual environment
+python3 -m venv venv
+
+# Activate the environment
+source venv/bin/activate
+
+# Install from source (editable)
+pip install -e .
+```
+
+After activation, the `ngen-gitops` and `gitops` commands will be available in your shell.
+
+### Global Installation (Symlink Method)
+
+If you want the `gitops` command to be available globally without manually activating the virtual environment every time, you can create a symlink to your system's bin directory:
+
+```bash
+# First, install inside the virtual environment as shown above
+./venv/bin/pip install -e .
+
+# Then, create symlinks (may require sudo)
+sudo ln -s $(pwd)/venv/bin/gitops /usr/local/bin/gitops
+sudo ln -s $(pwd)/venv/bin/ngen-gitops /usr/local/bin/ngen-gitops
+```
+
+### Global Installation (pipx Method)
+
+`pipx` is the recommended way to install and run Python applications in isolated environments.
+
+```bash
+# On Arch/CachyOS: sudo pacman -S python-pipx
+pipx install ngen-gitops
+``` or install from source folder:
+```bash
+pipx install .
+```
+
+## Installation Methods (Alternative)
+
+### From PyPI
+
 ```bash
 pip install ngen-gitops
+```
+
+### From Source (Direct)
+
+If you have the source code locally, you can install it using:
+
+```bash
+# Standard installation
+pip install .
+
+# Editable installation (development mode)
+pip install -e .
 ```
 
 Both `ngen-gitops` and `gitops` commands will be available after installation.
@@ -52,10 +124,14 @@ ngen-gitops supports multiple credential sources with the following priority:
 
 #### Option A: Using ~/.netrc (Recommended for existing setups)
 
-If you already have a `~/.netrc` file configured for Bitbucket, ngen-gitops will automatically use it:
+If you already have a `~/.netrc` file configured for GitHub or Bitbucket, ngen-gitops will automatically use it:
 
 ```bash
 # ~/.netrc
+machine github.com
+  login your-username
+  password your-personal-access-token
+
 machine bitbucket.org
   login your-username
   password your-app-password
@@ -70,6 +146,10 @@ On first run, ngen-gitops creates a config file at `~/.ngen-gitops/.env`:
 ```bash
 # ngen-gitops Configuration
 
+# GitHub Credentials (Default)
+GITHUB_TOKEN=your-github-personal-access-token
+GITHUB_ORG=your-github-organization
+
 # Bitbucket Credentials
 BITBUCKET_USER=
 BITBUCKET_APP_PASSWORD=
@@ -80,15 +160,21 @@ SERVER_HOST=0.0.0.0
 SERVER_PORT=8080
 
 # Git Settings
-GIT_DEFAULT_REMOTE=bitbucket.org
-GIT_DEFAULT_ORG=loyaltoid
-
+GIT_DEFAULT_REMOTE=github.com
+GIT_DEFAULT_ORG=your-github-organization
+```
 # Notifications
 TEAMS_WEBHOOK=
 ```
 
 **Update the config with your credentials:**
 
+For **GitHub**:
+1. Go to GitHub Settings -> Developer Settings -> Personal access tokens
+2. Generate a classic token or fine-grained token with repository access
+3. Update `~/.ngen-gitops/.env` with your token and organization name
+
+For **Bitbucket**:
 1. Go to Bitbucket Settings → App passwords
 2. Create a new app password with repository read/write permissions
 3. Update `~/.ngen-gitops/.env` with your username and app password
@@ -96,6 +182,9 @@ TEAMS_WEBHOOK=
 #### Option C: Using environment variables
 
 ```bash
+export GITHUB_TOKEN="your-github-token"
+export GITHUB_ORG="your-github-organization"
+
 export BITBUCKET_USER="your-username"
 export BITBUCKET_APP_PASSWORD="your-app-password"
 export BITBUCKET_ORG="your-organization"
@@ -135,12 +224,8 @@ Bitbucket:
    App Password: ***SET***
    Organization: loyaltoid
 
-Server:
-   Host: 0.0.0.0
-   Port: 8080
-
 Git:
-   Default Remote: bitbucket.org
+   Default Remote: github.com
    Default Org: loyaltoid
 
 Notifications:
@@ -263,7 +348,7 @@ gitops fetch
 gitops fetch --cwd /path/to/repo
 ```
 
-### GitOps Commands (Bitbucket Operations)
+### GitOps Operations (GitHub & Bitbucket)
 
 #### Create Branch
 
@@ -747,7 +832,7 @@ curl -X POST http://localhost:8080/v1/gitops/set-image-yaml \
   "destination": "develop",
   "delete_after_merge": false,
   "pr_id": 42,
-  "pr_url": "https://bitbucket.org/org/my-app/pull-requests/42",
+  "pr_url": "https://github.com/org/my-app/pull/42",
   "message": "Pull request #42 created successfully"
 }
 ```
@@ -771,7 +856,7 @@ curl -X POST http://localhost:8080/v1/gitops/pull-request \
 **Request:**
 ```json
 {
-  "pr_url": "https://bitbucket.org/org/my-app/pull-requests/42",
+  "pr_url": "https://github.com/org/my-app/pull/42",
   "delete_after_merge": false
 }
 ```
@@ -780,7 +865,7 @@ curl -X POST http://localhost:8080/v1/gitops/pull-request \
 ```json
 {
   "success": true,
-  "pr_url": "https://bitbucket.org/org/my-app/pull-requests/42",
+  "pr_url": "https://github.com/org/my-app/pull/42",
   "repository": "my-app",
   "pr_id": "42",
   "source": "feature/new-feature",
@@ -796,7 +881,7 @@ curl -X POST http://localhost:8080/v1/gitops/pull-request \
 curl -X POST http://localhost:8080/v1/gitops/merge \
   -H "Content-Type: application/json" \
   -d '{
-    "pr_url": "https://bitbucket.org/org/my-app/pull-requests/42",
+    "pr_url": "https://github.com/org/my-app/pull/42",
     "delete_after_merge": false
   }'
 ```
