@@ -1,4 +1,8 @@
-# Release Notes — ngen-gitops
+# Release Notes — ngen-gitops\n
+---\n
+## v0.1.17 — 2026-03-23\n
+### Changes\n
+<!-- TODO: Add release notes for v0.1.17 above this line -->\n
 
 ---
 
