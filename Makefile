@@ -1,4 +1,4 @@
-.PHONY: all venv install link clean help build publish release realease
+.PHONY: all venv install link clean help build publish release realease dev
 
 # Variables
 PYTHON = python3
@@ -23,6 +23,7 @@ help:
 	@echo "  make unlink          - Remove global symlinks (requires sudo)"
 	@echo "  make build           - Build source and wheel distributions"
 	@echo "  make publish         - Upload package to PyPI using twine"
+	@echo "  make dev             - Run server in development mode with auto-reload"
 	@echo "  make release [v]     - Bump version, build, publish, and tag in git"
 	@echo "                         Example: make release (auto-bump patch)"
 	@echo "                         Example: make release 0.1.15 (specific version)"
@@ -78,6 +79,11 @@ release: venv
 	echo "✅ Release $$NEW_VER completed successfully!"
 
 realease: release
+
+dev: venv
+	@echo "Starting server in development mode with reload..."
+	$(BIN)/uvicorn ngen_gitops.server:app --port 8080 --reload
+
 
 clean:
 	@echo "Cleaning up..."

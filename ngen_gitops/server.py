@@ -6,7 +6,7 @@ import sys
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -82,21 +82,45 @@ app.add_middleware(
 )
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 async def root():
-    """Root endpoint."""
+    """Redirect root to API documentation."""
+    return RedirectResponse(url="/docs")
+
+
+@app.get("/api/sample", tags=["Sample"])
+async def sample_api():
+    """Sample API endpoint for testing Swagger documentation."""
     return {
-        "name": "ngen-gitops API",
-        "version": __version__,
-        "endpoints": {
-            "create_branch": "POST /v1/gitops/create-branch",
-            "set_image_yaml": "POST /v1/gitops/set-image-yaml",
-            "pull_request": "POST /v1/gitops/pull-request",
-            "merge": "POST /v1/gitops/merge",
-            "k8s_pr": "POST /v1/gitops/k8s-pr"
-        },
-        "docs": "/docs"
+        "message": "Welcome to ngen-gitops sample API!",
+        "status": "success",
+        "data": {
+            "supported_providers": ["bitbucket", "github", "gitlab"],
+            "features": ["branch_management", "kubernetes_gitops", "pull_requests"]
+        }
     }
+
+
+@app.get("/config", tags=["Config"])
+async def get_config_info():
+    """Get current system configuration (passwords and tokens masked)."""
+    from .config import load_config
+    config = load_config()
+    
+    # Mask sensitive information securely
+    if "bitbucket" in config and "app_password" in config["bitbucket"]:
+        if config["bitbucket"]["app_password"]:
+            config["bitbucket"]["app_password"] = "***SET***"
+            
+    if "github" in config and "token" in config["github"]:
+        if config["github"]["token"]:
+            config["github"]["token"] = "***SET***"
+            
+    if "notifications" in config and "teams_webhook" in config["notifications"]:
+        if config["notifications"]["teams_webhook"]:
+            config["notifications"]["teams_webhook"] = "***SET***"
+            
+    return config
 
 
 @app.get("/health")
@@ -321,6 +345,64 @@ async def api_merge(request: MergeRequest):
                 'error_type': 'InternalError'
             }
         )
+
+
+@app.post("/v1/gitops/k8s-pr", tags=["GitOps"])
+async def api_k8s_pr(request: K8sPRRequest):
+    """Run Kubernetes PR Workflow (Create Branch -> Update Image -> PR -> Merge).
+    
+    Args:
+        request: K8sPRRequest containing k8s deployment parameters
+    
+    Returns:
+        JSON response with the workflow results
+    
+    Raises:
+        HTTPException: If operation fails
+    """
+    try:
+        result = run_k8s_pr_workflow(
+            cluster=request.cluster,
+            namespace=request.namespace,
+            deploy=request.deploy,
+            image=request.image,
+            approve_merge=request.approve_merge,
+            repo=request.repo
+        )
+        
+        if result.get('success', False):
+            return JSONResponse(content=result, status_code=200)
+        else:
+            raise HTTPException(status_code=400, detail=result)
+            
+    except GitOpsError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                'success': False,
+                'error': str(e),
+                'error_type': 'GitOpsError'
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                'success': False,
+                'error': str(e),
+                'error_type': 'ValueError'
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                'success': False,
+                'error': str(e),
+                'error_type': 'InternalError'
+            }
+        )
+
 
 
 def start_server(host: str = "0.0.0.0", port: int = 8080):
