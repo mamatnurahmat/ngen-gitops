@@ -14,7 +14,7 @@ from urllib.parse import quote
 import requests
 import yaml
 
-from .config import get_bitbucket_credentials
+from .config import get_bitbucket_credentials, get_k8s_pr_template
 from .teams_notify import (
     notify_branch_created,
     notify_image_updated,
@@ -790,35 +790,47 @@ def run_k8s_pr_workflow(
     deploy: str,
     image: str,
     approve_merge: bool = False,
-    repo: str = "gitops-k8s",
+    repo: str = None,
     user: Optional[str] = None
 ) -> Dict[str, Any]:
     """Run complete K8s PR workflow.
     
     Steps:
-    1. Create branch: {namespace}/{deploy}_deployment.yaml
-    2. Set image in YAML
+    1. Create branch using K8S_PR_BRANCH_TEMPLATE
+    2. Set image in YAML using K8S_PR_YAML_TEMPLATE
     3. Create Pull Request
     4. (Optional) Merge Pull Request
     
+    Template placeholders: {cluster}, {namespace}, {deploy}
+    Configure via .env:
+      K8S_PR_BRANCH_TEMPLATE={namespace}/{deploy}_deployment.yaml
+      K8S_PR_YAML_TEMPLATE={namespace}/{deploy}_deployment.yaml
+      K8S_PR_REPO=gitops-k8s
+    
     Args:
         cluster: Source branch (e.g., cluster name)
-        namespace: Kubernetes namespace
-        deploy: Deployment name
+        namespace: Kubernetes namespace / folder name at repo root
+        deploy: Deployment name / file prefix
         image: New image tag
         approve_merge: Whether to auto-merge the PR
-        repo: Repository name (default: gitops-k8s)
+        repo: Repository name (overrides K8S_PR_REPO from config)
         user: User triggering the workflow
         
     Returns:
         dict: Workflow results
     """
-    dest_branch = f"{namespace}/{deploy}_deployment.yaml"
-    yaml_path = f"{namespace}/{deploy}_deployment.yaml"
+    # Load templates from config
+    tmpl = get_k8s_pr_template()
+    ctx = {'cluster': cluster, 'namespace': namespace, 'deploy': deploy}
+    dest_branch = tmpl['branch_template'].format(**ctx)
+    yaml_path = tmpl['yaml_template'].format(**ctx)
+    effective_repo = repo if repo is not None else tmpl['repo']
     
     print(f"🚀 Starting K8s PR Workflow for {deploy} in {namespace}")
-    print(f"   Repo: {repo}")
+    print(f"   Repo: {effective_repo}")
     print(f"   Cluster/Source: {cluster}")
+    print(f"   Branch: {dest_branch}")
+    print(f"   YAML path: {yaml_path}")
     print(f"   Image: {image}")
     print(f"   User: {user or 'unknown'}")
     
@@ -833,7 +845,7 @@ def run_k8s_pr_workflow(
         # Step 1: Create Branch
         print("\n[Step 1/4] Creating branch...")
         branch_res = create_branch(
-            repo=repo,
+            repo=effective_repo,
             src_branch=cluster,
             dest_branch=dest_branch,
             user=user
@@ -843,7 +855,7 @@ def run_k8s_pr_workflow(
         # Step 2: Set Image
         print("\n[Step 2/4] Updating image in YAML...")
         image_res = set_image_in_yaml(
-            repo=repo,
+            repo=effective_repo,
             refs=dest_branch,
             yaml_path=yaml_path,
             image=image,
@@ -860,7 +872,7 @@ def run_k8s_pr_workflow(
         # Step 3: Create PR
         print("\n[Step 3/4] Creating Pull Request...")
         pr_res = create_pull_request(
-            repo=repo,
+            repo=effective_repo,
             src_branch=dest_branch,
             dest_branch=cluster,
             delete_after_merge=True,

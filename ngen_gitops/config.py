@@ -39,6 +39,15 @@ def create_default_env():
 # GIT_DEFAULT_ORG=your-github-organization
 # DEFAULT_IMAGE_REGISTRY=loyaltolpi
 
+# K8s PR Workflow Templates
+# cluster   = source branch in the repo (e.g. cluster name)
+# namespace = subfolder at root level of the gitops repo
+# deploy    = deployment name (prefix for the yaml file)
+# Available placeholders: {cluster}, {namespace}, {deploy}
+# K8S_PR_BRANCH_TEMPLATE={namespace}/{deploy}_deployment.yaml
+# K8S_PR_YAML_TEMPLATE={namespace}/{deploy}_deployment.yaml
+# K8S_PR_REPO=gitops-k8s
+
 # Notifications (Microsoft Teams)
 # TEAMS_WEBHOOK=https://your-org.webhook.office.com/webhookb2/...
 """
@@ -89,6 +98,11 @@ def load_config() -> Dict[str, Any]:
         },
         "notifications": {
             "teams_webhook": os.getenv("TEAMS_WEBHOOK", "")
+        },
+        "k8s_pr": {
+            "branch_template": os.getenv("K8S_PR_BRANCH_TEMPLATE", "{namespace}/{deploy}_deployment.yaml"),
+            "yaml_template": os.getenv("K8S_PR_YAML_TEMPLATE", "{namespace}/{deploy}_deployment.yaml"),
+            "repo": os.getenv("K8S_PR_REPO", "gitops-k8s")
         }
     }
     
@@ -318,3 +332,26 @@ def get_default_image_registry() -> str:
     """
     config = load_config()
     return config.get('git', {}).get('default_image_registry', 'loyaltolpi')
+
+
+def get_k8s_pr_template() -> Dict[str, str]:
+    """Get K8s PR workflow templates and defaults from config.
+
+    Templates support placeholders: {cluster}, {namespace}, {deploy}
+
+    Defaults (if not configured in .env):
+      - branch_template: {namespace}/{deploy}_deployment.yaml
+      - yaml_template:   {namespace}/{deploy}_deployment.yaml
+      - repo:            gitops-k8s
+
+    Returns:
+        dict with keys: branch_template, yaml_template, repo
+    """
+    config = load_config()
+    k8s = config.get('k8s_pr', {})
+    return {
+        'branch_template': k8s.get('branch_template', '{namespace}/{deploy}_deployment.yaml'),
+        'yaml_template': k8s.get('yaml_template', '{namespace}/{deploy}_deployment.yaml'),
+        'repo': k8s.get('repo', 'gitops-k8s'),
+    }
+

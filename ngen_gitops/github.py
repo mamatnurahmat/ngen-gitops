@@ -14,7 +14,7 @@ from urllib.parse import quote
 import requests
 import yaml
 
-from .config import get_github_credentials
+from .config import get_github_credentials, get_k8s_pr_template
 from .teams_notify import (
     notify_branch_created,
     notify_image_updated,
@@ -568,14 +568,29 @@ def run_k8s_pr_workflow(
     deploy: str,
     image: str,
     approve_merge: bool = False,
-    repo: str = "gitops-k8s",
+    repo: str = None,
     user: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Run complete K8s PR workflow for GitHub."""
-    dest_branch = f"{namespace}/{deploy}_deployment.yaml"
-    yaml_path = f"{namespace}/{deploy}_deployment.yaml"
+    """Run complete K8s PR workflow for GitHub.
+
+    Template placeholders: {cluster}, {namespace}, {deploy}
+    Configure via .env:
+      K8S_PR_BRANCH_TEMPLATE={namespace}/{deploy}_deployment.yaml
+      K8S_PR_YAML_TEMPLATE={namespace}/{deploy}_deployment.yaml
+      K8S_PR_REPO=gitops-k8s
+    """
+    tmpl = get_k8s_pr_template()
+    ctx = {'cluster': cluster, 'namespace': namespace, 'deploy': deploy}
+    dest_branch = tmpl['branch_template'].format(**ctx)
+    yaml_path = tmpl['yaml_template'].format(**ctx)
+    effective_repo = repo if repo is not None else tmpl['repo']
     
     print(f"🚀 Starting GitHub K8s PR Workflow for {deploy} in {namespace}")
+    print(f"   Repo: {effective_repo}")
+    print(f"   Cluster/Source: {cluster}")
+    print(f"   Branch: {dest_branch}")
+    print(f"   YAML path: {yaml_path}")
+    print(f"   Image: {image}")
     
     workflow_result: Dict[str, Any] = {
         "success": False,
@@ -587,12 +602,12 @@ def run_k8s_pr_workflow(
     try:
         # Step 1: Create Branch
         print("\n[Step 1/4] Creating branch...")
-        branch_res = create_branch(repo=repo, src_branch=cluster, dest_branch=dest_branch, user=user)
+        branch_res = create_branch(repo=effective_repo, src_branch=cluster, dest_branch=dest_branch, user=user)
         workflow_result["steps"].append({"name": "create_branch", "result": branch_res})
         
         # Step 2: Set Image
         print("\n[Step 2/4] Updating image in YAML...")
-        image_res = set_image_in_yaml(repo=repo, refs=dest_branch, yaml_path=yaml_path, image=image, user=user)
+        image_res = set_image_in_yaml(repo=effective_repo, refs=dest_branch, yaml_path=yaml_path, image=image, user=user)
         workflow_result["steps"].append({"name": "set_image", "result": image_res})
         
         if image_res.get('skipped'):
@@ -603,7 +618,7 @@ def run_k8s_pr_workflow(
 
         # Step 3: Create PR
         print("\n[Step 3/4] Creating Pull Request...")
-        pr_res = create_pull_request(repo=repo, src_branch=dest_branch, dest_branch=cluster, delete_after_merge=True, user=user)
+        pr_res = create_pull_request(repo=effective_repo, src_branch=dest_branch, dest_branch=cluster, delete_after_merge=True, user=user)
         workflow_result["steps"].append({"name": "create_pr", "result": pr_res})
         workflow_result["pr_url"] = pr_res.get("pr_url")
         
