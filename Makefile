@@ -67,13 +67,29 @@ release: venv
 	@NEW_VER=$$($(BIN)/python update_version.py $(VERSION_ARG) | tail -n 1); \
 	if [ -z "$$NEW_VER" ]; then echo "Failed to get new version"; exit 1; fi; \
 	echo "New version: $$NEW_VER"; \
+	echo "Generating release note entry in RELEASE.md..."; \
+	DATE=$$(date +%Y-%m-%d); \
+	TMP_NOTE=$$(mktemp); \
+	echo "# Release Notes — ngen-gitops\n" > $$TMP_NOTE; \
+	echo "---\n" >> $$TMP_NOTE; \
+	echo "## v$$NEW_VER — $$DATE\n" >> $$TMP_NOTE; \
+	echo "### Changes\n" >> $$TMP_NOTE; \
+	echo "<!-- TODO: Add release notes for v$$NEW_VER above this line -->\n" >> $$TMP_NOTE; \
+	if [ -f RELEASE.md ]; then \
+		tail -n +2 RELEASE.md >> $$TMP_NOTE; \
+		mv $$TMP_NOTE RELEASE.md; \
+	else \
+		mv $$TMP_NOTE RELEASE.md; \
+	fi; \
+	echo "Committing version bump and release notes..."; \
+	git add pyproject.toml ngen_gitops/__init__.py RELEASE.md; \
+	git commit -m "chore: release $$NEW_VER"; \
+	git push origin main; \
 	echo "Building package..."; \
 	$(MAKE) build; \
 	echo "Publishing to PyPI..."; \
 	$(MAKE) publish; \
 	echo "Tagging in Git..."; \
-	git add pyproject.toml ngen_gitops/__init__.py; \
-	git commit -m "chore: release $$NEW_VER"; \
 	git tag -a v$$NEW_VER -m "Release $$NEW_VER"; \
 	git push origin main --tags; \
 	echo "✅ Release $$NEW_VER completed successfully!"
