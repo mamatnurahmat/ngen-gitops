@@ -8,18 +8,28 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
 from . import __version__
-from .bitbucket import (
-    create_branch,
-    set_image_in_yaml,
-    create_pull_request,
-    merge_pull_request,
-    run_k8s_pr_workflow,
-    GitOpsError
-)
+from .config import get_default_remote
+
+from .bitbucket import GitOpsError as BitbucketError
+from .github import GitOpsError as GithubError
+GitOpsError = (BitbucketError, GithubError)
+
+def get_provider():
+    if 'github' in get_default_remote().lower():
+        import ngen_gitops.github as provider
+    else:
+        import ngen_gitops.bitbucket as provider
+    return provider
+
+def create_branch(*args, **kwargs): return get_provider().create_branch(*args, **kwargs)
+def set_image_in_yaml(*args, **kwargs): return get_provider().set_image_in_yaml(*args, **kwargs)
+def create_pull_request(*args, **kwargs): return get_provider().create_pull_request(*args, **kwargs)
+def merge_pull_request(*args, **kwargs): return get_provider().merge_pull_request(*args, **kwargs)
+def run_k8s_pr_workflow(*args, **kwargs): return get_provider().run_k8s_pr_workflow(*args, **kwargs)
 
 
 # Request models
@@ -55,21 +65,69 @@ class MergeRequest(BaseModel):
 
 class K8sPRRequest(BaseModel):
     """Request model for k8s-pr endpoint."""
-    cluster: str
-    namespace: str
-    deploy: str
-    image: str
-    approve_merge: bool = False
-    repo: str = "gitops-k8s"
+    cluster: str = Field(
+        ...,
+        description="Source branch in the GitOps repo (usually the cluster name, e.g. 'main' or 'k8s-cluster-1').",
+        examples=["main"]
+    )
+    namespace: str = Field(
+        ...,
+        description="Kubernetes namespace. Used as a subfolder path in the GitOps repo.",
+        examples=["my-ns"]
+    )
+    deploy: str = Field(
+        ...,
+        description="Deployment name. Used to locate the YAML file (e.g. '<namespace>/<deploy>_deployment.yaml').",
+        examples=["my-app"]
+    )
+    image: str = Field(
+        ...,
+        description="Full container image string to deploy (e.g. 'myregistry/app:v2.1.0').",
+        examples=["myregistry/app:v2.1.0"]
+    )
+    approve_merge: bool = Field(
+        False,
+        description="If true, automatically merge the PR after it is created. Default: false (PR is left open)."
+    )
+    repo: str = Field(
+        "gitops-k8s",
+        description="GitOps repository name. Overrides the K8S_PR_REPO config value. Default: 'gitops-k8s'.",
+        examples=["gitops-k8s"]
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "cluster": "main",
+                    "namespace": "my-ns",
+                    "deploy": "my-app",
+                    "image": "myregistry/app:v2.1.0",
+                    "approve_merge": True,
+                    "repo": "gitops-k8s"
+                }
+            ]
+        }
+    }
 
 
 # Create FastAPI app
 app = FastAPI(
     title="ngen-gitops API",
-    description="GitOps API server for Bitbucket operations",
+    description=(
+        "GitOps REST API server for **GitHub** and **Bitbucket** operations.\n\n"
+        "Automate Kubernetes deployment workflows including:\n"
+        "- 🌿 Branch creation\n"
+        "- 🖼️ Container image updates in YAML files\n"
+        "- 🔄 Pull Request creation and merging\n"
+        "- 🚀 Complete K8s GitOps workflow (`k8s-pr`)\n\n"
+        "The active Git provider (GitHub or Bitbucket) is determined by `GIT_DEFAULT_REMOTE` in your config."
+    ),
     version=__version__,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    contact={"name": "ngen-gitops", "url": "https://github.com/mamatnurahmat/ngen-gitops"},
+    license_info={"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
 )
 
 # Add CORS middleware
@@ -347,18 +405,85 @@ async def api_merge(request: MergeRequest):
         )
 
 
-@app.post("/v1/gitops/k8s-pr", tags=["GitOps"])
+@app.post(
+    "/v1/gitops/k8s-pr",
+    tags=["GitOps"],
+    summary="Run Kubernetes PR Workflow",
+    responses={
+        200: {
+            "description": "Workflow completed successfully",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "merged": {
+                            "summary": "PR created and merged",
+                            "value": {
+                                "success": True,
+                                "steps": [
+                                    {"name": "create_branch", "result": {"success": True, "branch_url": "https://github.com/org/gitops-k8s/tree/my-ns/my-app_deployment.yaml"}},
+                                    {"name": "set_image",    "result": {"success": True, "commit": "[my-ns/my-app_deployment.yaml abc1234] chore: update image"}},
+                                    {"name": "create_pr",   "result": {"success": True, "pr_id": 42, "pr_url": "https://github.com/org/gitops-k8s/pull/42"}},
+                                    {"name": "merge_pr",    "result": {"success": True, "merge_commit": "abc1234"}}
+                                ],
+                                "pr_url": "https://github.com/org/gitops-k8s/pull/42",
+                                "message": "Workflow completed successfully (merged)"
+                            }
+                        },
+                        "pr_only": {
+                            "summary": "PR created (not merged)",
+                            "value": {
+                                "success": True,
+                                "steps": [
+                                    {"name": "create_branch", "result": {"success": True}},
+                                    {"name": "set_image",    "result": {"success": True}},
+                                    {"name": "create_pr",   "result": {"success": True, "pr_url": "https://github.com/org/gitops-k8s/pull/42"}}
+                                ],
+                                "pr_url": "https://github.com/org/gitops-k8s/pull/42",
+                                "message": "Workflow completed successfully (PR created)"
+                            }
+                        },
+                        "skipped": {
+                            "summary": "Image already up to date (skipped)",
+                            "value": {
+                                "success": True,
+                                "steps": [
+                                    {"name": "create_branch", "result": {"success": True}},
+                                    {"name": "set_image",    "result": {"success": True, "skipped": True, "message": "Image already up-to-date: myregistry/app:v2.1.0"}}
+                                ],
+                                "pr_url": "",
+                                "message": "Image already up to date"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        400: {"description": "Workflow failed (bad request or GitOps error)"},
+        500: {"description": "Internal server error"}
+    }
+)
 async def api_k8s_pr(request: K8sPRRequest):
-    """Run Kubernetes PR Workflow (Create Branch -> Update Image -> PR -> Merge).
-    
-    Args:
-        request: K8sPRRequest containing k8s deployment parameters
-    
-    Returns:
-        JSON response with the workflow results
-    
-    Raises:
-        HTTPException: If operation fails
+    """
+    Run the full **Kubernetes GitOps PR Workflow**.
+
+    Executes the following steps in sequence:
+
+    1. **Create Branch** — creates `<namespace>/<deploy>_deployment.yaml` from `<cluster>`
+       (branch name is configurable via `K8S_PR_BRANCH_TEMPLATE` in your `.env`).
+    2. **Update Image** — clones the new branch and replaces the `image:` field
+       in `<namespace>/<deploy>_deployment.yaml` with the new image tag
+       (path configurable via `K8S_PR_YAML_TEMPLATE`).
+    3. **Create PR** — opens a pull request from the new branch back to `<cluster>`.
+    4. **Merge PR** *(optional)* — merges the PR immediately if `approve_merge` is `true`.
+
+    > ⚠️ If the image in the YAML file is already set to the requested value,
+    > the workflow stops after step 2 and returns `success: true` with `skipped: true`
+    > on the `set_image` step — no PR is created.
+
+    **Template defaults** (configurable in `~/.ngen-gitops/.env`):
+    - `K8S_PR_BRANCH_TEMPLATE` = `{namespace}/{deploy}_deployment.yaml`
+    - `K8S_PR_YAML_TEMPLATE`   = `{namespace}/{deploy}_deployment.yaml`
+    - `K8S_PR_REPO`            = `gitops-k8s`
     """
     try:
         result = run_k8s_pr_workflow(

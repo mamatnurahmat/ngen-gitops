@@ -622,7 +622,7 @@ gitops webhook my-app https://webhook.example.com/trigger
 
 #### Kubernetes PR Workflow (Interactive Mode)
 
-Run a complete GitOps workflow: Create Branch -> Update Image -> Create PR -> Merge (optional).
+Run a complete GitOps workflow: Create Branch → Update Image → Create PR → Merge (optional).
 
 **Interactive Mode** - Run without arguments to be prompted:
 
@@ -634,22 +634,23 @@ The command will interactively prompt for:
 - 🔧 Cluster (source branch)
 - 🔧 Kubernetes namespace
 - 🔧 Deployment name
-- 🔧 New image tag
+- 🔧 New image tag (suggestion shown from `DEFAULT_IMAGE_REGISTRY` config)
 - ❓ Auto-merge the PR? [y/N]
 
 **Non-Interactive Mode** - Provide all arguments:
 
 ```bash
-gitops k8s-pr <cluster> <namespace> <deploy> <image> [--approve-merge] [--repo REPO]
+gitops k8s-pr <cluster> <namespace> <deploy> <image> [--approve-merge] [--repo REPO] [--json]
 ```
 
 **Arguments:**
 - `cluster`: Source branch (e.g., cluster name like `k8s-cluster-1`)
 - `namespace`: Kubernetes namespace
 - `deploy`: Deployment name
-- `image`: New image tag
+- `image`: New image tag (full image string, e.g. `myregistry/app:v2`)
 - `--approve-merge`: Automatically merge the PR (skip confirmation prompt)
-- `--repo`: Repository name (default: `gitops-k8s`)
+- `--repo`: Repository name (overrides `K8S_PR_REPO` config, default: `gitops-k8s`)
+- `--json`: Output result as JSON
 
 **Examples:**
 ```bash
@@ -659,18 +660,38 @@ gitops k8s-pr
 # Non-interactive with auto-merge
 gitops k8s-pr main my-ns my-app myregistry/app:v2 --approve-merge
 
-# Non-interactive without auto-merge (will prompt)
+# Non-interactive without auto-merge (will prompt to confirm merge)
 gitops k8s-pr main my-ns my-app myregistry/app:v2
 
 # Custom repository
 gitops k8s-pr main my-ns my-app myregistry/app:v2 --repo my-gitops-repo
+
+# JSON output for CI/CD integration
+gitops k8s-pr main my-ns my-app myregistry/app:v2 --approve-merge --json
 ```
 
 **Workflow Steps:**
-1. Creates branch `my-ns/my-app_deployment.yaml` from `main`
-2. Updates image in `my-ns/my-app_deployment.yaml` file
-3. Creates PR from new branch to `main`
-4. Merges PR (if `--approve-merge` is set)
+1. Creates branch `<namespace>/<deploy>_deployment.yaml` from `<cluster>` (configurable via template)
+2. Updates the container image in `<namespace>/<deploy>_deployment.yaml` (configurable via template)
+3. Creates a PR from the new branch back to `<cluster>`
+4. Merges the PR automatically (only if `--approve-merge` flag is set)
+
+> ⚠️ If the image in the YAML is already up to date, the workflow stops after step 2 and skips creating a PR.
+
+**Template Configuration (optional):**
+
+Branch name and YAML path follow configurable templates. Set in `~/.ngen-gitops/.env`:
+
+```bash
+# Available placeholders: {cluster}, {namespace}, {deploy}
+K8S_PR_BRANCH_TEMPLATE={namespace}/{deploy}_deployment.yaml
+K8S_PR_YAML_TEMPLATE={namespace}/{deploy}_deployment.yaml
+K8S_PR_REPO=gitops-k8s
+```
+
+Example with defaults — for `cluster=main`, `namespace=my-ns`, `deploy=my-app`:
+- **Branch created**: `my-ns/my-app_deployment.yaml`
+- **YAML updated**: `my-ns/my-app_deployment.yaml` (in that branch)
 
 #### Start Web Server
 
@@ -890,6 +911,12 @@ curl -X POST http://localhost:8080/v1/gitops/merge \
 
 **Endpoint:** `POST /v1/gitops/k8s-pr`
 
+Runs the full GitOps K8s deployment workflow:
+1. Create a new branch from `cluster` (branch name from template)
+2. Update the container image in the target YAML file
+3. Create a PR from the new branch back to `cluster`
+4. Merge the PR (only if `approve_merge: true`)
+
 **Request:**
 ```json
 {
@@ -902,19 +929,70 @@ curl -X POST http://localhost:8080/v1/gitops/merge \
 }
 ```
 
-**Response:**
+**Request Fields:**
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `cluster` | string | ✅ | — | Source branch (e.g. cluster name) |
+| `namespace` | string | ✅ | — | Kubernetes namespace |
+| `deploy` | string | ✅ | — | Deployment name |
+| `image` | string | ✅ | — | Full image string (e.g. `registry/app:v2`) |
+| `approve_merge` | boolean | ❌ | `false` | Auto-merge the PR after creation |
+| `repo` | string | ❌ | `gitops-k8s` | GitOps repository name (overrides `K8S_PR_REPO`) |
+
+**Response (with merge):**
 ```json
 {
   "success": true,
   "steps": [
-    {"name": "create_branch", "result": {...}},
-    {"name": "set_image", "result": {...}},
-    {"name": "create_pr", "result": {...}},
-    {"name": "merge_pr", "result": {...}}
+    {"name": "create_branch", "result": {"success": true, "branch_url": "https://github.com/org/gitops-k8s/tree/my-ns/my-app_deployment.yaml", "..." : "..."}},
+    {"name": "set_image", "result": {"success": true, "commit": "[my-ns/my-app_deployment.yaml abc1234]", "...": "..."}},
+    {"name": "create_pr", "result": {"success": true, "pr_id": 42, "pr_url": "https://github.com/org/gitops-k8s/pull/42", "...": "..."}},
+    {"name": "merge_pr", "result": {"success": true, "merge_commit": "abc1234", "...": "..."}}
   ],
-  "pr_url": "https://bitbucket.org/...",
+  "pr_url": "https://github.com/org/gitops-k8s/pull/42",
   "message": "Workflow completed successfully (merged)"
 }
+```
+
+**Response (PR created, no merge):**
+```json
+{
+  "success": true,
+  "steps": [
+    {"name": "create_branch", "result": {"...": "..."}},
+    {"name": "set_image",    "result": {"...": "..."}},
+    {"name": "create_pr",   "result": {"pr_url": "https://github.com/org/gitops-k8s/pull/42", "...": "..."}}
+  ],
+  "pr_url": "https://github.com/org/gitops-k8s/pull/42",
+  "message": "Workflow completed successfully (PR created)"
+}
+```
+
+**Response (image already up to date — skipped):**
+```json
+{
+  "success": true,
+  "steps": [
+    {"name": "create_branch", "result": {"...": "..."}},
+    {"name": "set_image",    "result": {"success": true, "skipped": true, "message": "Image already up-to-date: myregistry/app:v2"}}
+  ],
+  "pr_url": "",
+  "message": "Image already up to date"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:8080/v1/gitops/k8s-pr \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cluster": "main",
+    "namespace": "my-ns",
+    "deploy": "my-app",
+    "image": "myregistry/app:v2",
+    "approve_merge": true,
+    "repo": "gitops-k8s"
+  }'
 ```
 
 ### API Documentation
